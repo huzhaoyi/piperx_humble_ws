@@ -62,7 +62,13 @@ class MoveItIkDiagnostics(Node):
         request.ik_request.timeout = Duration(sec=self.args.ik_timeout_sec)
 
         future = self.ik_client.call_async(request)
-        rclpy.spin_until_future_complete(self, future)
+        rclpy.spin_until_future_complete(
+            self,
+            future,
+            timeout_sec=self.args.service_timeout,
+        )
+        if not future.done():
+            raise RuntimeError(f"IK service timeout: {self.args.ik_service}")
         response = future.result()
         return response.error_code.val, response.solution.joint_state
 
@@ -77,7 +83,13 @@ class MoveItIkDiagnostics(Node):
         request.robot_state.joint_state = self.arm_joint_state(joint_state)
 
         future = self.fk_client.call_async(request)
-        rclpy.spin_until_future_complete(self, future)
+        rclpy.spin_until_future_complete(
+            self,
+            future,
+            timeout_sec=self.args.service_timeout,
+        )
+        if not future.done():
+            raise RuntimeError(f"FK service timeout: {self.args.fk_service}")
         response = future.result()
         return response.error_code.val, response.pose_stamped
 
@@ -107,24 +119,27 @@ class MoveItIkDiagnostics(Node):
             )
         )
 
-        fk_code, fk_poses = self.call_fk(joint_state)
-        if fk_poses:
-            pose = fk_poses[0].pose
-            self.get_logger().info(
-                "fk result code=%d xyz=(%.4f, %.4f, %.4f) quat=(%.4f, %.4f, %.4f, %.4f)"
-                % (
-                    fk_code,
-                    pose.position.x,
-                    pose.position.y,
-                    pose.position.z,
-                    pose.orientation.x,
-                    pose.orientation.y,
-                    pose.orientation.z,
-                    pose.orientation.w,
+        try:
+            fk_code, fk_poses = self.call_fk(joint_state)
+            if fk_poses:
+                pose = fk_poses[0].pose
+                self.get_logger().info(
+                    "fk result code=%d xyz=(%.4f, %.4f, %.4f) quat=(%.4f, %.4f, %.4f, %.4f)"
+                    % (
+                        fk_code,
+                        pose.position.x,
+                        pose.position.y,
+                        pose.position.z,
+                        pose.orientation.x,
+                        pose.orientation.y,
+                        pose.orientation.z,
+                        pose.orientation.w,
+                    )
                 )
-            )
-        else:
-            self.get_logger().warn("fk result code=%d returned no pose" % fk_code)
+            else:
+                self.get_logger().warn("fk result code=%d returned no pose" % fk_code)
+        except RuntimeError as exc:
+            self.get_logger().error(str(exc))
 
         for avoid_collisions in (False, True):
             code, solution = self.call_ik(target, joint_state, avoid_collisions)
@@ -153,6 +168,7 @@ def parse_args():
     parser.add_argument("--ik-link-name", default="tcp_link")
     parser.add_argument("--base-frame", default="world")
     parser.add_argument("--ik-timeout-sec", type=int, default=2)
+    parser.add_argument("--service-timeout", type=float, default=5.0)
     parser.add_argument("--offset-x", type=float, default=0.0)
     parser.add_argument("--offset-y", type=float, default=0.0)
     parser.add_argument("--offset-z", type=float, default=0.0)
