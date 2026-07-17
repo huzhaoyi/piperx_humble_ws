@@ -1,0 +1,15 @@
+diff --git a/src/agx_arm_moveit/config/agx_arm.srdf.xacro b/src/agx_arm_moveit/config/agx_arm.srdf.xacro
+index d69f987..dd622d4 100644
+--- a/src/agx_arm_moveit/config/agx_arm.srdf.xacro
++++ b/src/agx_arm_moveit/config/agx_arm.srdf.xacro
+@@ -380,6 +380,10 @@
+   <disable_collisions link1="link4" link2="link6" reason="Never" />
+   <disable_collisions link1="link5" link2="link6" reason="Adjacent" />
+ 
++  <xacro:if value="$(eval arm_type == 'piper_x')">
++    <disable_collisions link1="link1" link2="link5" reason="Never" />
++  </xacro:if>
++
+   <xacro:if value="$(eval arm_type == 'nero')">
+     <disable_collisions link1="base_link" link2="link4" reason="Never" />
+     <disable_collisions link1="base_link" link2="link5" reason="Never" />

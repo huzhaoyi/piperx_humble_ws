@@ -1,0 +1,11 @@
+grasp_interfaces/GraspTarget target
+bool enable_refine
+bool enable_place
+---
+bool success
+uint8 error_code
+string message
+---
+uint8 state
+float32 progress
+string description

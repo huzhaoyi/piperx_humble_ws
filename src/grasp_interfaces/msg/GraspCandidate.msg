@@ -1,0 +1,15 @@
+std_msgs/Header header
+uint32 candidate_id
+geometry_msgs/Pose pose
+geometry_msgs/Vector3 approach
+float32 score
+float32 width
+float32 height
+float32 depth
+float32 stability_score
+float32 planning_score
+float32 final_score
+bool ik_valid
+bool pregrasp_ik_valid
+bool approach_valid
+bool collision_free
