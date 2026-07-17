@@ -495,6 +495,8 @@ scripts/anygrasp_safe_pick.py          # 候选安全筛选和 RViz marker
 scripts/anygrasp_apply_scene.py        # MoveIt 桌面碰撞体
 scripts/anygrasp_full_pipeline.py      # plan-only / frozen execute 完整抓取流水线
 scripts/anygrasp_roi_selector.py       # OpenCV ROI 选择器
+scripts/moveit_ik_diagnostics.py       # MoveIt FK/IK 只读诊断
+scripts/piperx_grasp_preflight.py      # 抓取测试前硬件和 MoveIt 只读预检
 ```
 
 第一阶段正式包：
@@ -514,6 +516,8 @@ src/grasp_task_manager/
 
 当前 `grasp_task_manager` 已落地纯状态机和 ROS2 节点入口，先用于固化锁定、执行、空夹恢复和 abort/fault 状态流。它暂时不直接发送真实机械臂命令，后续再逐步接入 frozen candidate、plan-only 和 ExecuteGrasp action。
 
+`grasp_task_manager` 默认启用 `require_home_before_detection=true`。调用 `~/start` 后会先进入 `HOMING`，不能直接跳到检测和执行阶段。真实回 Home 仍应通过 PiperX 驱动提供的 `/move_home` 服务或等价关节目标完成，避免用 Home 精确 TCP 位姿反求 IK。
+
 当前实测结论：
 
 - AnyGrasp 到 PiperX 的位姿链路已经跑通。
@@ -523,6 +527,8 @@ src/grasp_task_manager/
 - 最近一次可达结果使用 `tcp_grasp_offset_z=0.10`，并保存为 `logs/anygrasp_runs/frozen_selected_latest.json`。
 - 夹爪默认打开宽度已调到 `0.08m`，避免 `0.06m` 开口不够导致空夹。
 - 轨迹默认降速为 `velocity_scale=0.05`、`acceleration_scale=0.03`，减少真实机械臂抖动。
+- Home 姿态下 `/feedback/tcp_pose` 与 MoveIt FK 一致，但 KDL IK 对当前精确 Home TCP 位姿返回 `-31`；这不是碰撞问题，因为 `avoid_collisions=false/true` 都失败。
+- 当前 TCP 沿 `+Z` 偏移 `0.08m` 后，IK 和 plan-only 均成功。因此启动安全姿态应走 `/move_home` 或关节目标，抓取健康检查应使用偏移后的 pregrasp 探针。
 
 推荐执行流程：
 
@@ -530,10 +536,21 @@ src/grasp_task_manager/
 cd ~/piperx_humble_ws
 source install/setup.bash
 
-# 1. 加入桌面碰撞体
+# 1. 只读预检：检查 arm/gripper 状态、当前 TCP、MoveIt IK pregrasp 探针
+python3 scripts/piperx_grasp_preflight.py
+
+# 2. 可选 plan-only 探针：从当前 TCP 上方 8cm 做 MoveIt 规划，不执行
+python3 scripts/anygrasp_moveit_pregrasp.py \
+    --target-source current_tcp \
+    --offset-z 0.08 \
+    --min-target-z 0.12 \
+    --velocity-scale 0.05 \
+    --acceleration-scale 0.03
+
+# 3. 加入桌面碰撞体
 python3 scripts/anygrasp_apply_scene.py
 
-# 2. plan-only，Top-50 候选中优先使用官方 0.12m offset，失败后回退扫描
+# 4. plan-only，Top-50 候选中优先使用官方 0.12m offset，失败后回退扫描
 python3 scripts/anygrasp_full_pipeline.py \
     --stop-at-first \
     --max-candidates 50 \
@@ -541,7 +558,7 @@ python3 scripts/anygrasp_full_pipeline.py \
     --save-selected-path logs/anygrasp_runs/frozen_selected_latest.json \
     --report-path logs/anygrasp_runs/full_pipeline_report_latest.json
 
-# 3. 只在 plan-only 通过且现场安全时，使用同一个 frozen candidate 执行
+# 5. 只在 plan-only 通过且现场安全时，使用同一个 frozen candidate 执行
 python3 scripts/anygrasp_full_pipeline.py \
     --frozen-selection-path logs/anygrasp_runs/frozen_selected_latest.json \
     --tcp-grasp-offset-z 0.10 \
