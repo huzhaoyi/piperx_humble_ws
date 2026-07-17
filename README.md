@@ -510,11 +510,23 @@ src/grasp_interfaces/
   action/ExecuteGrasp.action
 
 src/grasp_task_manager/
+  grasp_task_manager/pipeline_runner.py
   grasp_task_manager/state_machine.py
   grasp_task_manager/grasp_task_manager_node.py
 ```
 
-当前 `grasp_task_manager` 已落地纯状态机和 ROS2 节点入口，先用于固化锁定、执行、空夹恢复和 abort/fault 状态流。它暂时不直接发送真实机械臂命令，后续再逐步接入 frozen candidate、plan-only 和 ExecuteGrasp action。
+当前 `grasp_task_manager` 已接入 `ExecuteGrasp.action` 闭环编排。Action 执行顺序为：
+
+```text
+preflight / optional move_home
+  -> apply_scene
+  -> anygrasp_full_pipeline plan-only
+  -> save frozen candidate
+  -> frozen execute using the same tcp_grasp_offset_z
+  -> state_machine completed / fault
+```
+
+闭环编排复用已实测的脚本后端，不在状态机里重新实现 AnyGrasp、IK、MoveIt 轨迹和夹爪动作。这样可以保证 plan-only 和 execute 使用同一份 frozen candidate，避免感知刷新导致执行目标变化。
 
 `grasp_task_manager` 默认启用 `require_home_before_detection=true`。调用 `~/start` 后会先进入 `HOMING`，不能直接跳到检测和执行阶段。真实回 Home 仍应通过 PiperX 驱动提供的 `/move_home` 服务或等价关节目标完成，避免用 Home 精确 TCP 位姿反求 IK。
 
@@ -565,6 +577,41 @@ python3 scripts/anygrasp_full_pipeline.py \
     --execute \
     --report-path logs/anygrasp_runs/frozen_execute_report.json
 ```
+
+也可以使用正式 Action 闭环执行。启动任务管理器：
+
+```bash
+cd ~/piperx_humble_ws
+source install/setup.bash
+ros2 run grasp_task_manager grasp_task_manager
+```
+
+确认 Action 已注册：
+
+```bash
+ros2 action list -t | rg execute_grasp
+```
+
+发送闭环抓取目标：
+
+```bash
+ros2 action send_goal /execute_grasp grasp_interfaces/action/ExecuteGrasp \
+    "{target: {locked: true}, enable_refine: false, enable_place: false}" \
+    --feedback
+```
+
+默认参数：
+
+```text
+move_home_before_execute: true
+max_candidates: 50
+tcp_grasp_offset_candidates: 0.12,0.10,0.08,0.06
+frozen_selection_path: logs/anygrasp_runs/frozen_selected_latest.json
+plan_report_path: logs/anygrasp_runs/full_pipeline_report_latest.json
+execute_report_path: logs/anygrasp_runs/frozen_execute_report.json
+```
+
+注意：`enable_place=true` 当前会被拒绝，因为自动放置阶段还没有接入；闭环终点是夹爪闭合并抬升完成。
 
 注意：
 
